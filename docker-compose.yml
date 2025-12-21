@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  # Frontend - Interface Web
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NODE_ENV=development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  # Backend - API FastAPI
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/orchestrator
+      - REDIS_URL=redis://redis:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENVIRONMENT=development
+    volumes:
+      - ./backend:/app
+      - ./infrastructure:/app/infrastructure
+    depends_on:
+      - postgres
+      - redis
+
+  # AI Planner Service
+  ai-planner:
+    build:
+      context: ./ai-planner
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./ai-planner:/app
+    depends_on:
+      - backend
+
+  # Governance Service
+  governance:
+    build:
+      context: ./governance
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./governance:/app
+      - ./governance/policies:/app/policies
+    depends_on:
+      - backend
+
+  # Executor Service
+  executor:
+    build:
+      context: ./executor
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - TERRAFORM_VERSION=1.6.0
+      - ANSIBLE_VERSION=8.0.0
+    volumes:
+      - ./executor:/app
+      - ./infrastructure:/app/infrastructure
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - backend
+
+  # Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=orchestrator
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
+  # Redis para cache e filas
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Prometheus para métricas
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+
+  # Grafana para dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./observability/grafana/datasources:/etc/grafana/provisioning/datasources
+
+  # Loki para logs
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

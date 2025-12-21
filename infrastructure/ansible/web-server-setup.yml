@@ -1,0 +1,178 @@
+---
+# Playbook Ansible para configuração de servidor web
+# Usado pelo ByteShift Orchestrator
+
+- name: Configurar Servidor Web
+  hosts: web_servers
+  become: yes
+  vars:
+    project_name: "{{ project_name | default('byteshift-project') }}"
+    environment: "{{ environment | default('dev') }}"
+    nginx_port: "{{ nginx_port | default(80) }}"
+    ssl_enabled: "{{ ssl_enabled | default(false) }}"
+
+  tasks:
+    - name: Atualizar cache do apt
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Instalar pacotes essenciais
+      apt:
+        name:
+          - nginx
+          - curl
+          - wget
+          - git
+          - htop
+          - tree
+          - jq
+          - unzip
+          - fail2ban
+          - ufw
+        state: present
+
+    - name: Configurar firewall UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+      loop:
+        - ssh
+        - http
+        - https
+      notify: enable ufw
+
+    - name: Criar diretório do projeto
+      file:
+        path: "/var/www/{{ project_name }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    - name: Configurar Nginx - Site principal
+      template:
+        src: nginx-site.conf.j2
+        dest: "/etc/nginx/sites-available/{{ project_name }}"
+        backup: yes
+      notify: restart nginx
+
+    - name: Habilitar site do Nginx
+      file:
+        src: "/etc/nginx/sites-available/{{ project_name }}"
+        dest: "/etc/nginx/sites-enabled/{{ project_name }}"
+        state: link
+      notify: restart nginx
+
+    - name: Remover site padrão do Nginx
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: restart nginx
+
+    - name: Criar página inicial personalizada
+      template:
+        src: index.html.j2
+        dest: "/var/www/{{ project_name }}/index.html"
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+    - name: Configurar logrotate para Nginx
+      template:
+        src: nginx-logrotate.j2
+        dest: /etc/logrotate.d/nginx-custom
+        mode: '0644'
+
+    - name: Instalar Node Exporter para monitoramento
+      block:
+        - name: Baixar Node Exporter
+          get_url:
+            url: https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-amd64.tar.gz
+            dest: /tmp/node_exporter.tar.gz
+
+        - name: Extrair Node Exporter
+          unarchive:
+            src: /tmp/node_exporter.tar.gz
+            dest: /tmp
+            remote_src: yes
+
+        - name: Copiar binário do Node Exporter
+          copy:
+            src: /tmp/node_exporter-1.6.1.linux-amd64/node_exporter
+            dest: /usr/local/bin/node_exporter
+            mode: '0755'
+            remote_src: yes
+
+        - name: Criar usuário para Node Exporter
+          user:
+            name: node_exporter
+            system: yes
+            shell: /bin/false
+            home: /var/lib/node_exporter
+            create_home: no
+
+        - name: Criar serviço do Node Exporter
+          template:
+            src: node_exporter.service.j2
+            dest: /etc/systemd/system/node_exporter.service
+          notify: 
+            - reload systemd
+            - start node_exporter
+
+    - name: Configurar Fail2Ban
+      template:
+        src: fail2ban-nginx.conf.j2
+        dest: /etc/fail2ban/jail.d/nginx.conf
+      notify: restart fail2ban
+
+    - name: Criar script de health check
+      template:
+        src: health-check.sh.j2
+        dest: /usr/local/bin/health-check.sh
+        mode: '0755'
+
+    - name: Configurar cron para health check
+      cron:
+        name: "Health check do servidor web"
+        minute: "*/5"
+        job: "/usr/local/bin/health-check.sh"
+
+    - name: Verificar configuração do Nginx
+      command: nginx -t
+      changed_when: false
+
+    - name: Garantir que os serviços estejam rodando
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - nginx
+        - fail2ban
+        - node_exporter
+
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: enable ufw
+      ufw:
+        state: enabled
+
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: start node_exporter
+      systemd:
+        name: node_exporter
+        state: started
+        enabled: yes

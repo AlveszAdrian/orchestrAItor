@@ -1,0 +1,100 @@
+# Políticas de Governança do ByteShift Orchestrator
+
+resource_limits:
+  max_servers_per_request: 5
+  max_cpu_cores: 32
+  max_memory_gb: 128
+  max_storage_gb: 1000
+  allowed_regions:
+    - "us-east-1"
+    - "us-west-2" 
+    - "eu-west-1"
+    - "sa-east-1"
+  allowed_instance_types:
+    - "t3.micro"
+    - "t3.small"
+    - "t3.medium"
+    - "t3.large"
+    - "m5.large"
+    - "m5.xlarge"
+
+security_policies:
+  require_encryption: true
+  require_backup: true
+  require_monitoring: true
+  require_https: true
+  forbidden_ports:
+    - 22    # SSH
+    - 3389  # RDP
+    - 5432  # PostgreSQL
+    - 3306  # MySQL
+    - 6379  # Redis
+  allowed_protocols:
+    - "HTTPS"
+    - "HTTP"
+    - "TCP"
+    - "UDP"
+  mandatory_tags:
+    - "Environment"
+    - "Project"
+    - "Owner"
+    - "CostCenter"
+
+approval_policies:
+  critical_actions:
+    - "delete"
+    - "destroy"
+    - "terminate"
+    - "drop"
+    - "remove"
+  high_cost_threshold: 1000  # USD por mês
+  production_environments:
+    - "prod"
+    - "production"
+    - "live"
+  requires_approval_by_role:
+    viewer: true
+    operator: false
+    admin: false
+  requires_approval_by_duration: 60  # minutos
+
+compliance:
+  data_residency: true
+  audit_logging: true
+  access_control: true
+  encryption_at_rest: true
+  encryption_in_transit: true
+  backup_retention_days: 30
+  log_retention_days: 90
+
+cost_controls:
+  daily_budget_limit: 500    # USD
+  monthly_budget_limit: 10000 # USD
+  alert_threshold_percentage: 80
+  auto_shutdown_enabled: true
+  auto_shutdown_threshold: 95
+
+network_policies:
+  allow_public_access: false
+  require_vpc: true
+  require_private_subnets: true
+  allowed_cidr_blocks:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+
+monitoring_policies:
+  require_health_checks: true
+  require_log_aggregation: true
+  require_metrics_collection: true
+  alert_on_failures: true
+  sla_requirements:
+    uptime_percentage: 99.9
+    response_time_ms: 500
+
+backup_policies:
+  require_automated_backups: true
+  backup_frequency_hours: 24
+  backup_retention_days: 30
+  cross_region_backup: true
+  test_restore_frequency_days: 30
